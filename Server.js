@@ -27,21 +27,50 @@ app.use(limiter);
 // Allow both localhost for dev and your Netlify frontend in production
 const allowedOrigins = [
   'http://localhost:5173', // local dev
-  'https://birthday-reminder38.netlify.app' // production
+  'https://birthday-reminder38.netlify.app' // production frontend
 ];
 
+// CORS middleware
 app.use(cors({
   origin: function (origin, callback) {
-    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    
+    if (allowedOrigins.indexOf(origin) !== -1) {
       callback(null, true);
     } else {
+      console.log('CORS blocked for origin:', origin);
       callback(new Error('CORS not allowed for this origin'));
     }
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type','Authorization','X-Requested-With']
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  exposedHeaders: ['Content-Range', 'X-Content-Range']
 }));
+
+// Handle preflight requests explicitly
+app.options('*', (req, res) => {
+  const origin = req.headers.origin;
+  if (allowedOrigins.includes(origin)) {
+    res.header('Access-Control-Allow-Origin', origin);
+  }
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.header('Access-Control-Max-Age', '86400'); // 24 hours
+  res.sendStatus(204);
+});
+
+// Add CORS headers to all responses
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (allowedOrigins.includes(origin)) {
+    res.header('Access-Control-Allow-Origin', origin);
+  }
+  res.header('Access-Control-Allow-Credentials', 'true');
+  next();
+});
 
 // -------------------- Body Parsing --------------------
 app.use(express.json({ limit: '10mb' }));
@@ -102,6 +131,8 @@ app.get('/api/health', (req, res) => {
     message: 'Server is running!',
     timestamp: new Date().toISOString(),
     database: mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected',
+    service: 'Birthday Reminder API',
+    version: '1.0.0'
   });
 });
 
@@ -110,13 +141,16 @@ app.get('/', (req, res) => {
   res.json({
     message: '🎉 Birthday Reminder Backend is running!',
     timestamp: new Date().toISOString(),
-    routes: [
+    service: 'Birthday Reminder API',
+    version: '1.0.0',
+    endpoints: [
       '/api/auth',
       '/api/birthdays',
       '/api/notifications',
       '/api/health',
       '/api/debug-uploads',
     ],
+    docs: 'Check /api/health for service status'
   });
 });
 
@@ -142,25 +176,38 @@ app.use((err, req, res, next) => {
 
   // CORS errors
   if (err.message === 'CORS not allowed for this origin') {
-    return res.status(403).json({ error: err.message });
+    return res.status(403).json({ 
+      error: 'CORS Error',
+      message: 'Access from this origin is not allowed',
+      allowedOrigins: allowedOrigins
+    });
   }
 
   res.status(500).json({
     error: 'Internal server error',
     message:
       process.env.NODE_ENV === 'development' ? err.message : 'Something went wrong!',
+    timestamp: new Date().toISOString()
   });
 });
 
 // -------------------- 404 Handler --------------------
 app.use('*', (req, res) => {
-  res.status(404).json({ error: 'Route not found' });
+  res.status(404).json({ 
+    error: 'Route not found',
+    path: req.originalUrl,
+    method: req.method,
+    timestamp: new Date().toISOString()
+  });
 });
 
 // -------------------- Start Server --------------------
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
-  console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`Static files served from: ${path.join(__dirname, 'uploads')}`);
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`=================================`);
+  console.log(`🚀 Server is running on port ${PORT}`);
+  console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`📁 Static files: ${path.join(__dirname, 'uploads')}`);
+  console.log(`✅ CORS allowed origins: ${allowedOrigins.join(', ')}`);
+  console.log(`=================================`);
 });
