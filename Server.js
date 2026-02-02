@@ -23,24 +23,34 @@ const limiter = rateLimit({
 });
 app.use(limiter);
 
-// CORS configuration
-app.use(
-  cors({
-    origin: process.env.CLIENT_URL || 'https://birthday-reminder38.netlify.app',
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
-  })
-);
+// -------------------- CORS Setup --------------------
+// Allow both localhost for dev and your Netlify frontend in production
+const allowedOrigins = [
+  'http://localhost:5173', // local dev
+  'https://birthday-reminder38.netlify.app' // production
+];
 
-// Body parsing middleware
+app.use(cors({
+  origin: function (origin, callback) {
+    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      callback(new Error('CORS not allowed for this origin'));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type','Authorization','X-Requested-With']
+}));
+
+// -------------------- Body Parsing --------------------
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
 // -------------------- Static Files --------------------
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-// Debug route to list uploads folder
+// -------------------- Debug Route --------------------
 app.get('/api/debug-uploads', (req, res) => {
   const fs = require('fs');
   const uploadsPath = path.join(__dirname, 'uploads');
@@ -65,22 +75,21 @@ app.use((req, res, next) => {
 });
 
 // -------------------- Database Connection --------------------
-mongoose
-  .connect(process.env.MONGO_URI, {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
-  })
-  .then(() => {
-    console.log('MongoDB connected successfully');
+mongoose.connect(process.env.MONGO_URI, {
+  useNewUrlParser: true,
+  useUnifiedTopology: true,
+})
+.then(() => {
+  console.log('MongoDB connected successfully');
 
-    // Start birthday notification scheduler after DB connection
-    const { scheduleBirthdayChecks } = require('./services/birthdayService');
-    scheduleBirthdayChecks();
-  })
-  .catch((err) => {
-    console.error('MongoDB connection error:', err);
-    process.exit(1);
-  });
+  // Start birthday notification scheduler after DB connection
+  const { scheduleBirthdayChecks } = require('./services/birthdayService');
+  scheduleBirthdayChecks();
+})
+.catch((err) => {
+  console.error('MongoDB connection error:', err);
+  process.exit(1);
+});
 
 // -------------------- Routes --------------------
 app.use('/api/auth', authRoutes);
@@ -129,6 +138,11 @@ app.use((err, req, res, next) => {
     return res.status(400).json({
       message: 'Only image files are allowed',
     });
+  }
+
+  // CORS errors
+  if (err.message === 'CORS not allowed for this origin') {
+    return res.status(403).json({ error: err.message });
   }
 
   res.status(500).json({
